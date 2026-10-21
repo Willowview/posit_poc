@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Static site + API proof of concept</title>
+  <style>
+    :root { color-scheme: light; font: 16px/1.5 system-ui, sans-serif; color: #17202a; background: #f3f6f8; }
+    body { max-width: 760px; margin: 3rem auto; padding: 0 1.25rem; }
+    main { background: white; border: 1px solid #d7e0e5; border-radius: 12px; padding: 2rem; }
+    h1 { margin-top: 0; }
+    .status { padding: .8rem 1rem; background: #eef5f7; border-radius: 8px; }
+    label { display: block; margin: .8rem 0; }
+    input { display: block; width: 100%; box-sizing: border-box; padding: .65rem; margin-top: .25rem; }
+    button { padding: .65rem 1rem; margin: .3rem .3rem .3rem 0; cursor: pointer; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f5f7f8; padding: 1rem; border-radius: 8px; }
+    .muted { color: #53636b; }
+  </style>
+</head>
+<body>
+<main>
+  <p class="muted">POSIT CONNECT CLOUD · DEPLOYMENT PROOF OF CONCEPT</p>
+  <h1>Static page and protected API</h1>
+  <p>This HTML is served by the same Python app that handles the API routes below.</p>
+  <p class="status" id="status">Checking public API…</p>
+
+  <section>
+    <h2>Editor access</h2>
+    <p class="muted">Anyone can open this page. Only the editor can use the protected API action.</p>
+    <form id="login">
+      <label>Username<input name="username" autocomplete="username" required></label>
+      <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+      <button type="submit">Sign in</button>
+      <button type="button" id="logout" hidden>Sign out</button>
+    </form>
+  </section>
+
+  <section>
+    <h2>Server-side secret test</h2>
+    <label>Message to sign<input id="message" maxlength="500" value="Connect Cloud API test"></label>
+    <button type="button" id="sign" disabled>Call protected API</button>
+    <p class="muted">The backend signs this message with a deployment secret. The secret itself is never returned.</p>
+  </section>
+  <pre id="output" aria-live="polite">Waiting for API response…</pre>
+</main>
+<script>
+  "use strict";
+  var csrfToken = "";
+  var output = document.getElementById("output");
+  var statusLine = document.getElementById("status");
+  var signButton = document.getElementById("sign");
+  var logoutButton = document.getElementById("logout");
+
+  function show(value) {
+    output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  }
+
+  async function request(path, options) {
+    var response = await fetch(path, Object.assign({
+      credentials: "same-origin",
+      headers: { "Accept": "application/json" }
+    }, options || {}));
+    var body = await response.json();
+    if (!response.ok) throw new Error(body.detail || "Request failed (" + response.status + ")");
+    return body;
+  }
+
+  async function refresh() {
+    try {
+      var result = await request("/api/public");
+      statusLine.textContent = result.message + " Current role: " + result.role + ".";
+      var session = await request("/api/session");
+      csrfToken = session.authenticated ? session.csrf_token : "";
+      signButton.disabled = !session.authenticated;
+      logoutButton.hidden = !session.authenticated;
+      show(session.authenticated ? "Signed in as " + session.username + "." : "Browsing as a public visitor.");
+    } catch (error) {
+      statusLine.textContent = "API unavailable: " + error.message;
+      show(error.message);
+    }
+  }
+
+  document.getElementById("login").addEventListener("submit", async function (event) {
+    event.preventDefault();
+    var form = event.currentTarget;
+    try {
+      var result = await request("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: form.elements.username.value,
+          password: form.elements.password.value
+        })
+      });
+      csrfToken = result.csrf_token;
+      form.elements.password.value = "";
+      await refresh();
+    } catch (error) {
+      show(error.message);
+    }
+  });
+
+  logoutButton.addEventListener("click", async function () {
+    try {
+      await request("/api/logout", { method: "POST", headers: { "X-CSRF-Token": csrfToken } });
+      csrfToken = "";
+      await refresh();
+    } catch (error) {
+      show(error.message);
+    }
+  });
+
+  signButton.addEventListener("click", async function () {
+    try {
+      var result = await request("/api/sign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+        body: JSON.stringify({ message: document.getElementById("message").value })
+      });
+      show("Protected API returned a signature:\n" + result.signature +
+        "\nSecret returned to browser: " + result.secret_returned_to_browser);
+    } catch (error) {
+      show(error.message);
+    }
+  });
+
+  ["pointerdown", "keydown", "input", "scroll", "touchstart"].forEach(function (name) {
+    window.addEventListener(name, function () {
+      if (!csrfToken || Date.now() - (window.lastSessionRefresh || 0) < 60000) return;
+      window.lastSessionRefresh = Date.now();
+      request("/api/session").then(function (result) {
+        if (!result.authenticated) {
+          csrfToken = "";
+          signButton.disabled = true;
+          logoutButton.hidden = true;
+          statusLine.textContent = "Editor session expired. You can still browse.";
+        }
+      }).catch(function (error) { show(error.message); });
+    }, { passive: true });
+  });
+
+  refresh();
+</script>
+</body>
+</html>
