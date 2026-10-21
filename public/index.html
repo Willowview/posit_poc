@@ -50,26 +50,40 @@
   var statusLine = document.getElementById("status");
   var signButton = document.getElementById("sign");
   var logoutButton = document.getElementById("logout");
+  var appPath = window.location.pathname;
+  if (!appPath.endsWith("/")) appPath += "/";
+
+  function apiPath(path) {
+    return appPath + path.replace(/^\/+/, "");
+  }
 
   function show(value) {
     output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
   }
 
   async function request(path, options) {
-    var response = await fetch(path, Object.assign({
+    var url = apiPath(path);
+    var response = await fetch(url, Object.assign({
       credentials: "same-origin",
       headers: { "Accept": "application/json" }
     }, options || {}));
-    var body = await response.json();
+    var text = await response.text();
+    var body;
+    try {
+      body = text ? JSON.parse(text) : {};
+    } catch (error) {
+      throw new Error("API endpoint " + url + " returned non-JSON HTTP " + response.status +
+        ". Response begins: " + text.slice(0, 100));
+    }
     if (!response.ok) throw new Error(body.detail || "Request failed (" + response.status + ")");
     return body;
   }
 
   async function refresh() {
     try {
-      var result = await request("/api/public");
+      var result = await request("api/public");
       statusLine.textContent = result.message + " Current role: " + result.role + ".";
-      var session = await request("/api/session");
+      var session = await request("api/session");
       csrfToken = session.authenticated ? session.csrf_token : "";
       signButton.disabled = !session.authenticated;
       logoutButton.hidden = !session.authenticated;
@@ -84,7 +98,7 @@
     event.preventDefault();
     var form = event.currentTarget;
     try {
-      var result = await request("/api/login", {
+      var result = await request("api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -102,7 +116,7 @@
 
   logoutButton.addEventListener("click", async function () {
     try {
-      await request("/api/logout", { method: "POST", headers: { "X-CSRF-Token": csrfToken } });
+      await request("api/logout", { method: "POST", headers: { "X-CSRF-Token": csrfToken } });
       csrfToken = "";
       await refresh();
     } catch (error) {
@@ -112,7 +126,7 @@
 
   signButton.addEventListener("click", async function () {
     try {
-      var result = await request("/api/sign", {
+      var result = await request("api/sign", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
         body: JSON.stringify({ message: document.getElementById("message").value })
@@ -128,7 +142,7 @@
     window.addEventListener(name, function () {
       if (!csrfToken || Date.now() - (window.lastSessionRefresh || 0) < 60000) return;
       window.lastSessionRefresh = Date.now();
-      request("/api/session").then(function (result) {
+      request("api/session").then(function (result) {
         if (!result.authenticated) {
           csrfToken = "";
           signButton.disabled = true;

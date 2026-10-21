@@ -22,8 +22,10 @@ production security/deployment policy.
    - `COOKIE_SECURE`: `true` for the HTTPS deployment.
 4. Deploy. Open the published URL. The public API status should load without signing in. Use the
    configured editor credentials to call the protected signing endpoint.
-5. Inspect the browser Network panel: the page should call `/api/public`, `/api/session`, `/api/login`,
-   and `/api/sign` on the same origin. The secret value must never appear in page source or response.
+5. Inspect the browser Network panel: API calls should be under the app's Connect Cloud URL, for
+   example `<published-app-url>/api/public`, `<published-app-url>/api/session`,
+   `<published-app-url>/api/login`, and `<published-app-url>/api/sign`. The secret value must never
+   appear in page source or response.
 
 Connect Cloud's current GitHub publishing guide says Python projects require `requirements.txt`,
 and that encrypted secret variables can be consumed by application code. The exact framework
